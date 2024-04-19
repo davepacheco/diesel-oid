@@ -1,0 +1,40 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= diesel-oid
+
+This repo contains a test case for some unexpected diesel behavior.
+
+Output when run against PostgreSQL 16:
+
+```
+$ cargo run -- postgresql://127.0.0.1:5432/dap
+   Compiling diesel-oid v0.1.0 (/Users/dap/diesel-oid)
+    Finished dev [unoptimized + debuginfo] target(s) in 0.44s
+     Running `target/debug/diesel-oid 'postgresql://127.0.0.1:5432/dap'`
+connecting to: postgresql://127.0.0.1:5432/dap
+connected!
+initialized schema
+inserted rows: 1
+found rows: [MyTable { a: 0, b: One }]
+updated schema
+ERROR: second insert failed: cache lookup failed for type 16455
+establishing second connection
+connected!
+insert on second connection worked: 1
+contents of table after second insert (second conn):
+rows: [MyTable { a: 0, b: One }, MyTable { a: 0, b: One }]
+contents of table after second insert (first conn):
+Error: listing contents of table
+
+Caused by:
+    cached plan must not change result type
+```
+
+The surprising behavior here is the "ERROR" line.  What's going on is:
+
+. From one connection, we successfully INSERT a row into table `my_table`, which has a column of user-defined type `my_type`.  This populates Diesel's OID cache for the type `my_type`.
+. Then we change the schema in a way that's compatible with the Diesel definition of that schema, but with a different OID (by dropping and re-creating the user-defined type).
+. Then we try the INSERT again.  It fails unexpectedly.  It appears that what's happening is Diesel is sending the same OID as before, from its cache, but that's wrong now.
+. To prove it's just a caching issue: we create a second connection and do the same INSERT again.  It works.
